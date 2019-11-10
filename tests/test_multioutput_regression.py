@@ -22,7 +22,6 @@ def test_atp1d():
     target = df.loc[:, df.columns.str.startswith('LBL')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
-    target = SparseRandomProjection(n_components=1, random_state=42).fit_transform(X=target)
     X_train, X_test, y_train, y_test = train_test_split(df, target, test_size=0.5, random_state=42, shuffle=True)
     gb = GradientBoostingRegressor(
         verbose=1,
@@ -32,7 +31,7 @@ def test_atp1d():
         # min_samples_leaf=15
     )
     gb.fit(X_train, y_train)
-    y_preds = gb.predict(X_test)
+    y_preds = gb.predict_multi(X_test)
     pd.DataFrame(y_preds).to_csv('/home/Kenny/PycharmProjects/DreamPretermBirth/CompetitionPart2/try.csv',index=False)
     r2 = r2_score(y_test, y_preds, multioutput='uniform_average')
     print(r2)
@@ -45,7 +44,8 @@ def test_edm():
     X_train, X_test, y_train, y_test = train_test_split(df, target, test_size=0.5, random_state=42, shuffle=False)
     gb = GradientBoostingRegressor(
         verbose=1,
-        random_state=42
+        random_state=42,
+        max_iter=100,
     )
     gb.fit(X_train, y_train)
     y_preds = gb.predict_multi(X_test)

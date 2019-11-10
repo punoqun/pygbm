@@ -154,7 +154,7 @@ class TreePredictor:
 
         out = np.empty((X.shape[0], prediction_dim), dtype=np.float32)
         _predict_from_numeric_data_multi(self.nodes, X, out)
-        return
+        return out
 
 
 def _predict_one_binned(nodes, binned_data):

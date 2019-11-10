@@ -197,8 +197,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             shape=(n_samples, self.prediction_dim),
             dtype=self.baseline_prediction_.dtype
         )
-        # if not self.multi_output:
-        #     raw_predictions = raw_predictions.ravel()
+        if not self.multi_output:
+            raw_predictions = raw_predictions.ravel()
         raw_predictions += self.baseline_prediction_
 
         # gradients and hessians are 1D arrays of size
@@ -267,7 +267,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
                 if self.multi_output:
                     for l in grower.finalized_leaves:
-                        l.residual = (-self.learning_rate * np.sum(a=gradients[:, :], axis=0) / (l.sum_hessians + self.l2_regularization + np.finfo(np.float64).eps))
+                        l.residual = (-self.learning_rate * np.sum(a=gradients[l.sample_indices, :], axis=0) / (l.sum_hessians + self.l2_regularization + np.finfo(np.float64).eps))
                     leaves_data = [(l.residual, l.sample_indices)
                                    for l in grower.finalized_leaves]
                 else:
@@ -500,9 +500,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 predict = (predictor.predict_binned_multi if is_binned
                            else predictor.predict_multi)
                 tmp = predict(X, self.prediction_dim)
-                print(tmp)
-                print(type(tmp))
-                raw_predictions += predict(X, self.prediction_dim)
+                if tmp.dtype !='float32':
+                    print(tmp)
+                raw_predictions = np.add(raw_predictions,predict(X, self.prediction_dim))
 
         return raw_predictions
 
@@ -813,7 +813,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         return _LOSSES[self.loss]()
 
 
-@njit(parallel=True)
+# @njit(parallel=True)
 def _update_raw_predictions(leaves_data, raw_predictions):
     """Update raw_predictions by reading the predictions of the ith tree
     directly form the leaves.
@@ -832,4 +832,4 @@ def _update_raw_predictions(leaves_data, raw_predictions):
     for leaf_idx in prange(len(leaves_data)):
         leaf_value, sample_indices = leaves_data[leaf_idx]
         for sample_idx in sample_indices:
-            raw_predictions[sample_idx, :] += leaf_value
+            raw_predictions[sample_idx] += leaf_value

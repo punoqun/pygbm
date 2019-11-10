@@ -150,8 +150,8 @@ class LeastSquares(BaseLoss):
 def _update_gradients_least_squares(gradients, y_true, raw_predictions):
     # shape (n_samples, 1) --> (n_samples,). reshape(-1) is more likely to
     # return a view.
-    raw_predictions = raw_predictions.reshape(-1)
-    y_true = y_true.reshape(-1)
+    # raw_predictions = raw_predictions.reshape(-1)
+    # y_true = y_true.reshape(-1)
     n_samples = raw_predictions.shape[0]
     starts, ends, n_threads = get_threads_chunks(total_size=n_samples)
     for thread_idx in prange(n_threads):
@@ -179,10 +179,10 @@ class BinaryCrossEntropy(BaseLoss):
     def __call__(self, y_true, raw_predictions, average=True):
         # shape (n_samples, 1) --> (n_samples,). reshape(-1) is more likely to
         # return a view.
-        raw_predictions = raw_predictions.reshape(-1)
+        # raw_predictions = raw_predictions.reshape(-1)
         # logaddexp(0, x) = log(1 + exp(x))
         loss = np.logaddexp(0, raw_predictions) - y_true * raw_predictions
-        return loss.mean() if average else loss
+        return loss.mean(axis=0) if average else loss
 
     def get_baseline_prediction(self, y_train, prediction_dim):
         proba_positive_class = np.mean(y_train)
