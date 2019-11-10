@@ -7,6 +7,7 @@ import numpy as np
 from numba import njit, prange
 from time import time
 from sklearn.base import BaseEstimator, RegressorMixin, ClassifierMixin
+from sklearn.random_projection import SparseRandomProjection
 from sklearn.utils import check_X_y, check_random_state, check_array
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
@@ -22,6 +23,8 @@ from pygbm.loss import _LOSSES
 class BaseGradientBoostingMachine(BaseEstimator, ABC):
     """Base class for gradient boosting estimators."""
 
+    multi_output = False
+    prediction_dim = 1
     @abstractmethod
     def __init__(self, loss, learning_rate, max_iter, max_leaf_nodes,
                  max_depth, min_samples_leaf, l2_regularization, max_bins,
@@ -103,7 +106,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         acc_prediction_time = 0.
         # TODO: add support for mixed-typed (numerical + categorical) data
         # TODO: add support for missing data
-        X, y = check_X_y(X, y, dtype=[np.float32, np.float64, np.uint8])
+        self.multi_output = len(y.ravel()) != len(y)
+        self.prediction_dim = y.shape[1]
+        X, y = check_X_y(X, y, dtype=[np.float32, np.float64, np.uint8], multi_output=self.multi_output)
         y = self._encode_y(y)
         if X.shape[0] == 1 or X.shape[1] == 1:
             raise ValueError(
@@ -185,22 +190,25 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         n_samples = X_binned_train.shape[0]
         self.baseline_prediction_ = self.loss_.get_baseline_prediction(
-            y_train, self.n_trees_per_iteration_)
+            y_train, self.prediction_dim)
         # raw_predictions are the accumulated values predicted by the trees
         # for the training data.
         raw_predictions = np.zeros(
-            shape=(n_samples, self.n_trees_per_iteration_),
+            shape=(n_samples, self.prediction_dim),
             dtype=self.baseline_prediction_.dtype
         )
+        # if not self.multi_output:
+        #     raw_predictions = raw_predictions.ravel()
         raw_predictions += self.baseline_prediction_
 
         # gradients and hessians are 1D arrays of size
         # n_samples * n_trees_per_iteration
         gradients, hessians = self.loss_.init_gradients_and_hessians(
             n_samples=n_samples,
-            prediction_dim=self.n_trees_per_iteration_
+            prediction_dim=self.prediction_dim
         )
-
+        if not self.multi_output:
+            gradients = gradients.ravel()
         # predictors_ is a matrix of TreePredictor objects with shape
         # (n_iter_, n_trees_per_iteration)
         self.predictors_ = predictors = []
@@ -231,11 +239,16 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                                                      y_train, raw_predictions)
 
             predictors.append([])
+            if self.multi_output:
+                proj_gradients, proj_hessians = self.randomly_project_gradients_and_hessians(gradients, hessians)
+            else:
+                proj_gradients, proj_hessians = gradients, hessians
 
             # Build `n_trees_per_iteration` trees.
+            print(iteration)
             for k, (gradients_at_k, hessians_at_k) in enumerate(zip(
-                    np.array_split(gradients, self.n_trees_per_iteration_),
-                    np.array_split(hessians, self.n_trees_per_iteration_))):
+                    np.array_split(proj_gradients, self.n_trees_per_iteration_),
+                    np.array_split(proj_hessians, self.n_trees_per_iteration_))):
                 # the xxxx_at_k arrays are **views** on the original arrays.
                 # Note that for binary classif and regressions,
                 # n_trees_per_iteration is 1 and xxxx_at_k is equivalent to the
@@ -252,6 +265,14 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     shrinkage=self.learning_rate)
                 grower.grow()
 
+                if self.multi_output:
+                    for l in grower.finalized_leaves:
+                        l.residual = (-self.learning_rate * np.sum(a=gradients[:, :], axis=0) / (l.sum_hessians + self.l2_regularization + np.finfo(np.float64).eps))
+                    leaves_data = [(l.residual, l.sample_indices)
+                                   for l in grower.finalized_leaves]
+                else:
+                    leaves_data = [(l.value, l.sample_indices) for l in grower.finalized_leaves]
+
                 acc_apply_split_time += grower.total_apply_split_time
                 acc_find_split_time += grower.total_find_split_time
 
@@ -262,9 +283,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
                 # prepare leaves_data so that _update_raw_predictions can be
                 # @njitted
-                leaves_data = [(l.value, l.sample_indices)
-                               for l in grower.finalized_leaves]
-                _update_raw_predictions(leaves_data, raw_predictions[:, k])
+
+
+                _update_raw_predictions(leaves_data, raw_predictions)
                 toc_pred = time()
                 acc_prediction_time += toc_pred - tic_pred
 
@@ -351,7 +372,10 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             return self.scorer_(self, X, y)
 
         # Else, use the negative loss as score.
-        raw_predictions = self._raw_predict(X)
+        if self.multi_output:
+            raw_predictions = self._raw_predict_multi(X)
+        else:
+            raw_predictions = self._raw_predict(X)
         return -self.loss_(y, raw_predictions)
 
     def _print_iteration_stats(self, iteration_start_time, do_early_stopping):
@@ -432,6 +456,60 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 raw_predictions[:, k] += predict(X)
 
         return raw_predictions
+
+    def _raw_predict_multi(self, X):
+        """Return the sum of the leaves values over all predictors.
+
+        Parameters
+        ----------
+        X : array-like, shape=(n_samples, n_features)
+            The input samples. If ``X.dtype == np.uint8``, the data is assumed
+            to be pre-binned and the estimator must have been fitted with
+            pre-binned data.
+
+        Returns
+        -------
+        raw_predictions : array, shape (n_samples * n_trees_per_iteration,)
+            The raw predicted values.
+        """
+        X = check_array(X)
+        check_is_fitted(self, 'predictors_')
+        if X.shape[1] != self.n_features_:
+            raise ValueError(
+                f'X has {X.shape[1]} features but this estimator was '
+                f'trained with {self.n_features_} features.'
+            )
+        is_binned = X.dtype == np.uint8
+        if not is_binned and self.bin_mapper_ is None:
+            raise ValueError(
+                'This estimator was fitted with pre-binned data and '
+                'can only predict pre-binned data as well. If your data *is* '
+                'already pre-binnned, convert it to uint8 using e.g. '
+                'X.astype(np.uint8). If the data passed to fit() was *not* '
+                'pre-binned, convert it to float32 and call fit() again.'
+            )
+        n_samples = X.shape[0]
+        raw_predictions = np.zeros(
+            shape=(n_samples, self.prediction_dim),
+            dtype=self.baseline_prediction_.dtype
+        )
+        raw_predictions += self.baseline_prediction_
+        # Should we parallelize this?
+        for predictors_of_ith_iteration in self.predictors_:
+            for k, predictor in enumerate(predictors_of_ith_iteration):
+                predict = (predictor.predict_binned_multi if is_binned
+                           else predictor.predict_multi)
+                tmp = predict(X, self.prediction_dim)
+                print(tmp)
+                print(type(tmp))
+                raw_predictions += predict(X, self.prediction_dim)
+
+        return raw_predictions
+
+    def randomly_project_gradients_and_hessians(self, gradients, hessians):
+        proj_g = SparseRandomProjection(n_components=1, random_state=self.random_state).fit_transform(X=gradients)
+        proj_h = hessians #SparseRandomProjection(n_components=1, random_state=self.random_state).fit_transform(X=hessians)
+        return proj_g.ravel().astype(np.float32), proj_h.astype(np.float32)
 
     @abstractmethod
     def _get_loss(self):
@@ -552,6 +630,25 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         # Return raw predictions after converting shape
         # (n_samples, 1) to (n_samples,)
         return self._raw_predict(X).ravel()
+
+    def predict_multi(self, X):
+        """Predict values for X.
+
+        Parameters
+        ----------
+        X : array-like, shape=(n_samples, n_features)
+            The input samples. If ``X.dtype == np.uint8``, the data is assumed
+            to be pre-binned and the estimator must have been fitted with
+            pre-binned data.
+
+        Returns
+        -------
+        y : array, shape (n_samples,)
+            The predicted values.
+        """
+        # Return raw predictions after converting shape
+        # (n_samples, 1) to (n_samples,)
+        return self._raw_predict_multi(X)
 
     def _encode_y(self, y):
         # Just convert y to float32
@@ -735,4 +832,4 @@ def _update_raw_predictions(leaves_data, raw_predictions):
     for leaf_idx in prange(len(leaves_data)):
         leaf_value, sample_indices = leaves_data[leaf_idx]
         for sample_idx in sample_indices:
-            raw_predictions[sample_idx] += leaf_value
+            raw_predictions[sample_idx, :] += leaf_value

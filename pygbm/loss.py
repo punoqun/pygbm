@@ -62,7 +62,8 @@ class BaseLoss(ABC):
             If hessians are constant (e.g. for ``LeastSquares`` loss, shape
             is (1,) and the array is initialized to ``1``.
         """
-        shape = n_samples * prediction_dim
+
+        shape = (n_samples, prediction_dim)
         gradients = np.empty(shape=shape, dtype=np.float32)
         if self.hessian_is_constant:
             hessians = np.ones(shape=1, dtype=np.float32)
@@ -128,12 +129,13 @@ class LeastSquares(BaseLoss):
     def __call__(self, y_true, raw_predictions, average=True):
         # shape (n_samples, 1) --> (n_samples,). reshape(-1) is more likely to
         # return a view.
-        raw_predictions = raw_predictions.reshape(-1)
+        if len(raw_predictions.ravel()) == len(raw_predictions):
+            raw_predictions = raw_predictions.reshape(-1)
         loss = np.power(y_true - raw_predictions, 2)
         return loss.mean() if average else loss
 
     def get_baseline_prediction(self, y_train, prediction_dim):
-        return np.mean(y_train)
+        return np.mean(y_train, axis=0)
 
     def inverse_link_function(self, raw_predictions):
         return raw_predictions
@@ -149,6 +151,7 @@ def _update_gradients_least_squares(gradients, y_true, raw_predictions):
     # shape (n_samples, 1) --> (n_samples,). reshape(-1) is more likely to
     # return a view.
     raw_predictions = raw_predictions.reshape(-1)
+    y_true = y_true.reshape(-1)
     n_samples = raw_predictions.shape[0]
     starts, ends, n_threads = get_threads_chunks(total_size=n_samples)
     for thread_idx in prange(n_threads):

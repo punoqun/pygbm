@@ -69,6 +69,7 @@ class TreeNode:
     left_child = None
     right_child = None
     value = None
+    residual = None
     histograms = None
     sibling = None
     parent = None
@@ -450,6 +451,10 @@ class TreeGrower:
             # Leaf node
             node['is_leaf'] = True
             node['value'] = grower_node.value
+            if grower_node.residual is not None:
+                node['residual'] = grower_node.residual
+            else:
+                node['residual'] = grower_node.value
             return next_free_idx + 1
         else:
             # Decision node
