@@ -107,7 +107,10 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         # TODO: add support for mixed-typed (numerical + categorical) data
         # TODO: add support for missing data
         self.multi_output = len(y.ravel()) != len(y)
-        self.prediction_dim = y.shape[1]
+        if self.multi_output:
+            self.prediction_dim = y.shape[1]
+        else:
+            self.prediction_dim = 1
         X, y = check_X_y(X, y, dtype=[np.float32, np.float64, np.uint8], multi_output=self.multi_output)
         y = self._encode_y(y)
         if X.shape[0] == 1 or X.shape[1] == 1:
@@ -242,10 +245,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             if self.multi_output:
                 proj_gradients, proj_hessians = self.randomly_project_gradients_and_hessians(gradients, hessians)
             else:
-                proj_gradients, proj_hessians = gradients, hessians
+                proj_gradients, proj_hessians = gradients.ravel(), hessians.ravel()
 
             # Build `n_trees_per_iteration` trees.
-            print(iteration)
             for k, (gradients_at_k, hessians_at_k) in enumerate(zip(
                     np.array_split(proj_gradients, self.n_trees_per_iteration_),
                     np.array_split(proj_hessians, self.n_trees_per_iteration_))):
@@ -283,7 +285,6 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
                 # prepare leaves_data so that _update_raw_predictions can be
                 # @njitted
-
 
                 _update_raw_predictions(leaves_data, raw_predictions)
                 toc_pred = time()
