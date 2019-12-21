@@ -1,25 +1,13 @@
-import os
-import warnings
-
-import numpy as np
-from numpy.testing import assert_allclose
-import pytest
-from sklearn.preprocessing import StandardScaler
-from sklearn.utils.testing import assert_raises_regex
-from sklearn.datasets import make_classification, make_regression
-
-from pygbm import GradientBoostingClassifier
-from pygbm import GradientBoostingRegressor
-from pygbm.binning import BinMapper
-from sklearn.model_selection import train_test_split
-from sklearn.random_projection import SparseRandomProjection
-from sklearn.utils import shuffle
 import pandas as pd
 from sklearn.metrics import r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+from pygbm import GradientBoostingRegressor
 
 
 def test_atp1d():
-    df = pd.read_csv('/home/Kenny/Documents/atp1d.csv')
+    df = pd.read_csv('atp1d.csv')
     target = df.loc[:, df.columns.str.startswith('LBL')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
@@ -45,7 +33,7 @@ def test_atp1d():
     print(r2)
 
 def test_atp7d():
-    df = pd.read_csv('/home/Kenny/Documents/atp7d.csv')
+    df = pd.read_csv('atp7d.csv')
     target = df.loc[:, df.columns.str.startswith('LBL')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
@@ -72,7 +60,7 @@ def test_atp7d():
 
 
 def test_edm():
-    df = pd.read_csv('/home/Kenny/Documents/edm.csv')
+    df = pd.read_csv('edm.csv')
     target = df.loc[:, ['DFlow', 'DGap']]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
@@ -99,7 +87,7 @@ def test_edm():
 
 
 def test_scm1d():
-    df = pd.read_csv('/home/Kenny/Documents/scm1d.csv')
+    df = pd.read_csv('scm1d.csv')
     target = df.loc[:, df.columns.str.contains('L')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
@@ -126,7 +114,7 @@ def test_scm1d():
 
 
 def test_scm20d():
-    df = pd.read_csv('/home/Kenny/Documents/scm20d.csv')
+    df = pd.read_csv('scm20d.csv')
     target = df.loc[:, df.columns.str.contains('L')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
@@ -154,7 +142,7 @@ def test_scm20d():
 
 
 def test_wq():
-    df = pd.read_csv('/home/Kenny/Documents/water-quality.csv')
+    df = pd.read_csv('water-quality.csv')
     target = df.loc[:, df.columns.str.startswith('x')]
     df.drop(target.columns, axis=1, inplace=True)
     df, target = df.to_numpy(), target.to_numpy()
